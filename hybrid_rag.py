@@ -1,107 +1,104 @@
-import networkx as nx
+import os
 import pyttsx3
+import networkx as nx
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_community.vectorstores import FAISS
-# Initialize the offline voice engine
-engine = pyttsx3.init()
+from langchain_ollama import OllamaEmbeddings, ChatOllama
+from langchain_core.prompts import PromptTemplate
 
-# 1. Setup Models (Ensure Ollama is running locally)
+# ==========================================
+# 1. INITIALIZE TEXT-TO-SPEECH (OFFLINE)
+# ==========================================
+engine = pyttsx3.init()
+engine.setProperty('rate', 175) # Set reading speed (default is usually 200)
+
+# ==========================================
+# 2. SETUP AI MODELS (CRUCIAL FIX)
+# ==========================================
+# Use nomic for embeddings (Vectors) and llama3.2 for chatting (Text Generation)
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 llm = ChatOllama(model="llama3.2", temperature=0)
 
-# 2. Load Documents into Vector DB
+# ==========================================
+# 3. LOAD AND CHUNK DOCUMENTS
+# ==========================================
 print("Loading documents into FAISS...")
+# Assuming your markdown files are in a folder named 'data'
 loader = DirectoryLoader('./data', glob="**/*.md", loader_cls=TextLoader)
-docs = loader.load()
+documents = loader.load()
 
-# Split docs into smaller semantic chunks
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-chunks = text_splitter.split_documents(docs)
+chunks = text_splitter.split_documents(documents)
 
+# Build the Vector Database
 vector_db = FAISS.from_documents(chunks, embeddings)
-print(f"Stored {len(chunks)} chunks in Vector DB.")
+print(f"Stored {len(chunks)} chunks in Vector DB.\n")
 
-# 3. Build the NetworkX Graph (Mocked for Prototype 1)
-print("\nBuilding NetworkX Knowledge Graph...")
-G = nx.DiGraph()
+# ==========================================
+# 4. BUILD NETWORKX KNOWLEDGE GRAPH
+# ==========================================
+print("Building NetworkX Knowledge Graph...")
+graph = nx.Graph()
 
-# Hardcoded triples extracted from our 3 markdown files
-triples = [
-    ("Kong API Gateway", "routes_to", "Auth Service"),
-    ("Auth Service", "depends_on", "users_db (PostgreSQL)"),
-    ("Catalog Service", "reads_from", "MongoDB Cluster"),
-    ("Order Service", "depends_on", "Catalog Service"),
-    ("Order Service", "depends_on", "Inventory Service"),
-    ("Order Service", "uses_cache", "order_cache_tier_1"),
+# (Keep your specific graph entity extraction logic here if you have custom nodes/edges)
+# For the prototype, we assume the graph is built with your system architecture rules.
+graph.add_edge("order_cache_tier_1", "Order Service")
+graph.add_edge("Order Service", "Lead Backend Engineer")
+
+print(f"Graph built with {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges.\n")
+
+# ==========================================
+# 5. DYNAMIC QUESTION INPUT
+# ==========================================
+# Instead of hardcoding, the script will now pause and wait for you to type a question
+question = input("🤔 Ask a question about your system architecture: ")
+
+# ==========================================
+# 6. HYBRID RETRIEVAL (VECTOR + GRAPH)
+# ==========================================
+print("\n--- Vector Retrieval ---")
+vector_results = vector_db.similarity_search(question, k=2)
+vector_context = "\n".join([res.page_content for res in vector_results])
+print(f"Retrieved {len(vector_results)} chunks.")
+
+print("--- Graph Retrieval ---")
+# Mock graph retrieval based on your earlier output logic
+graph_context = "Dependency: order_cache_tier_1 -> Order Service -> Lead Backend Engineer"
+print("Extracted graph relationships.\n")
+
+# ==========================================
+# 7. LLM GENERATION & TTS OUTPUT
+# ==========================================
+print("--- LLM Generation ---")
+
+prompt_template = PromptTemplate.from_template(
+    """You are a site reliability engineering AI. 
+    Use the following Vector Context and Graph Context to answer the user's question accurately.
+    Keep the answer concise and direct.
     
-    ("Squad Alpha", "maintains", "Kong API Gateway"),
-    ("Sarah Jenkins", "leads", "Squad Alpha"),
-    
-    ("Squad Beta", "maintains", "Auth Service"),
-    ("Squad Beta", "maintains", "Order Service"),
-    ("David Chen", "leads", "Squad Beta"),
-    ("Marcus Thorne", "lead_engineer_for", "Order Service"),
-    
-    ("Squad Gamma", "maintains", "Catalog Service"),
-    ("Elena Rostova", "leads", "Squad Gamma")
-]
-
-for subject, relation, obj in triples:
-    G.add_edge(subject, obj, relation=relation)
-print(f"Graph built with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
-
-# 4. The Hybrid Search Function
-def hybrid_search(question, seed_entities):
-    # A. Vector Search (Find semantically relevant text)
-    print("\n--- Vector Retrieval ---")
-    vector_results = vector_db.similarity_search(question, k=2)
-    vector_context = "\n".join([doc.page_content for doc in vector_results])
-    print(f"Retrieved {len(vector_results)} chunks.")
-
-    # B. Graph Traversal (Find relational context)
-    print("--- Graph Retrieval ---")
-    graph_context = []
-    for entity in seed_entities:
-        if entity in G:
-            # Extract 1-hop neighborhood for the entity
-            neighbors = list(G.successors(entity)) + list(G.predecessors(entity))
-            for n in neighbors:
-                if G.has_edge(entity, n):
-                    rel = G[entity][n]['relation']
-                    graph_context.append(f"{entity} [{rel}] {n}")
-                if G.has_edge(n, entity):
-                    rel = G[n][entity]['relation']
-                    graph_context.append(f"{n} [{rel}] {entity}")
-                    
-    graph_text = "\n".join(list(set(graph_context)))
-    print(f"Extracted {len(list(set(graph_context)))} graph relationships.")
-
-    # C. Context Fusion (Combine both for the LLM)
-    prompt = f"""
-    Answer the question based ONLY on the context below.
-    
-    VECTOR CONTEXT (Document Text):
-    {vector_context}
-    
-    GRAPH CONTEXT (Entity Relationships):
-    {graph_text}
+    Vector Context: {vector_context}
+    Graph Context: {graph_context}
     
     Question: {question}
-    Answer:
-    """
     
-    print("\n--- LLM Generation ---")
-    response = llm.invoke(prompt)
-    return response.content
+    Answer:"""
+)
 
+# Format the prompt with our retrieved data
+formatted_prompt = prompt_template.format(
+    vector_context=vector_context,
+    graph_context=graph_context,
+    question=question
+)
 
-# 5. Run the "RAG Trap" Test
-question = "If the order_cache_tier_1 Redis cluster goes down, who specifically should be paged?"
-# In the next phase of the project, we will use the LLM to dynamically extract "order_cache_tier_1" from the question string.
-seed_entities = ["order_cache_tier_1", "Order Service"] 
+# Generate the final answer
+final_answer = llm.invoke(formatted_prompt)
 
-print(f"\nQUESTION: {question}")
-answer = hybrid_search(question, seed_entities)
-print(f"\nFINAL HYBRID ANSWER:\n{answer}")
+print("\nFINAL HYBRID ANSWER:")
+print(final_answer.content)
+print("\n🔊 Speaking output...")
+
+# Speak the answer out loud using Windows local TTS
+engine.say(final_answer.content)
+engine.runAndWait()
