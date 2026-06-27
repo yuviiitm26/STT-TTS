@@ -1,8 +1,11 @@
 import networkx as nx
+import pyttsx3
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_community.vectorstores import FAISS
+# Initialize the offline voice engine
+engine = pyttsx3.init()
 
 # 1. Setup Models (Ensure Ollama is running locally)
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
@@ -92,6 +95,7 @@ def hybrid_search(question, seed_entities):
     print("\n--- LLM Generation ---")
     response = llm.invoke(prompt)
     return response.content
+
 
 # 5. Run the "RAG Trap" Test
 question = "If the order_cache_tier_1 Redis cluster goes down, who specifically should be paged?"
